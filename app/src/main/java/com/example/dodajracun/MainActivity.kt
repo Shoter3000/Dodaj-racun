@@ -2,14 +2,12 @@ package com.example.dodajracun
 
 import android.Manifest
 import android.content.ContentUris
-import android.content.ContentValues
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.os.Build
 import android.os.Bundle
-import android.provider.MediaStore
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -46,6 +44,7 @@ import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import androidx.camera.core.ImageCaptureException
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -98,7 +97,6 @@ fun ScanReceiptScreen(
     roiWidthDp: Dp = 160.dp,
     roiHeightDp: Dp = 60.dp
 ) {
-    var resultText by remember { mutableStateOf("Rezultat bo tu") }
     var croppedBitmapDisplay by remember { mutableStateOf<Bitmap?>(null) }
     var recognizedAmount by remember { mutableStateOf<String?>(null) }
     var showDialog by remember { mutableStateOf(false) }
@@ -112,6 +110,15 @@ fun ScanReceiptScreen(
             .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
             .setTargetAspectRatio(AspectRatio.RATIO_4_3)
             .build()
+    }
+
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
+    fun showMessage(msg: String) {
+        scope.launch {
+            snackbarHostState.showSnackbar(msg)
+        }
     }
 
     fun Dp.toPx(): Float = this.value * context.resources.displayMetrics.density
@@ -162,6 +169,7 @@ fun ScanReceiptScreen(
             )
         } catch (e: Exception) {
             Log.e("CameraX", "Bind failed", e)
+            showMessage("Napaka pri inicializaciji kamere!")
         }
     }
 
@@ -178,55 +186,51 @@ fun ScanReceiptScreen(
 
     fun saveAmountToCsv(context: android.content.Context, amount: String) {
         try {
-            val displayName = "racuni.csv"
+            val displayName = "računi.csv"
             val relativePath = "Documents/Računi"
-
             val resolver = context.contentResolver
 
-            // Preveri, ali datoteka že obstaja
-            val existingUri = MediaStore.Files.getContentUri("external")
+            val existingUri = android.provider.MediaStore.Files.getContentUri("external")
             val query = resolver.query(
                 existingUri,
-                arrayOf(MediaStore.MediaColumns._ID),
-                "${MediaStore.MediaColumns.RELATIVE_PATH}=? AND ${MediaStore.MediaColumns.DISPLAY_NAME}=?",
-                arrayOf(relativePath + "/", displayName),
+                arrayOf(android.provider.MediaStore.MediaColumns._ID),
+                "${android.provider.MediaStore.MediaColumns.RELATIVE_PATH}=? AND ${android.provider.MediaStore.MediaColumns.DISPLAY_NAME}=?",
+                arrayOf("$relativePath/", displayName),
                 null
             )
 
             val fileUri = if (query != null && query.moveToFirst()) {
-                val id = query.getLong(query.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
-                ContentUris.withAppendedId(existingUri, id)
+                val id = query.getLong(query.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns._ID))
+                android.content.ContentUris.withAppendedId(existingUri, id)
             } else {
-                val values = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
-                    put(MediaStore.MediaColumns.MIME_TYPE, "text/csv")
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+                val values = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+                    put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/csv")
+                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
                 }
-                resolver.insert(MediaStore.Files.getContentUri("external"), values)
+                resolver.insert(existingUri, values)
             }
             query?.close()
 
             fileUri?.let { uri ->
                 resolver.openOutputStream(uri, "wa")?.bufferedWriter(Charsets.UTF_8).use { writer ->
-                    val dateTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
-                    writer?.write("$amount €,$dateTime\n")
+                    val dateTime = SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale("sl", "SI")).format(Date())
+                    val amountFormatted = amount.replace(',', '.')
+                    writer?.write("$amountFormatted,$dateTime\n")
+
                     writer?.flush()
                 }
-
             }
 
-            resultText = "Znesek shranjen v Documents/Računi/racuni.csv"
+            showMessage("Znesek shranjen v Documents/Računi/računi.csv")
 
         } catch (e: Exception) {
-            resultText = "Napaka pri shranjevanju: ${e.message}"
+            showMessage("Napaka pri shranjevanju: ${e.message}")
         }
     }
 
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
-
-        // Dark overlay
-        Box(modifier = Modifier.fillMaxSize().background(Color(0xAA000000)))
 
         // ROI okvir
         Box(
@@ -295,33 +299,29 @@ fun ScanReceiptScreen(
                                         recognizedAmount = znesek
                                         showDialog = true
                                     } else {
-                                        resultText = "Znesek ni zaznan."
+                                        showMessage("Znesek ni zaznan")
                                     }
                                 }
                                 .addOnFailureListener {
-                                    resultText = "Napaka pri prepoznavi besedila!"
+                                    showMessage("Napaka pri prepoznavi besedila!")
                                 }
                         }
 
                         override fun onError(exception: ImageCaptureException) {
-                            resultText = "Napaka pri zajemu slike!"
+                            showMessage("Napaka pri zajemu slike!")
                         }
                     }
                 )
             },
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 32.dp),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 80.dp)
+                .height(64.dp)
+                .width(200.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
         ) {
-            Text("Skeniraj", color = Color.White, fontSize = 18.sp)
+            Text("Skeniraj", color = Color.White, fontSize = 22.sp)
         }
-
-        // Rezultat
-        Text(
-            text = resultText,
-            fontSize = 18.sp,
-            color = Color.White,
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = 32.dp)
-        )
 
         // Prikaz obrezane slike
         croppedBitmapDisplay?.let { bmp ->
@@ -330,7 +330,7 @@ fun ScanReceiptScreen(
                 contentDescription = "Obrezan ROI",
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 100.dp)
+                    .padding(bottom = 160.dp)
                     .size(width = roiWidthDp, height = roiHeightDp)
                     .border(2.dp, Color.White, RoundedCornerShape(8.dp))
             )
@@ -359,5 +359,11 @@ fun ScanReceiptScreen(
                 }
             )
         }
+
+        // Snackbar host
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = 16.dp)
+        )
     }
 }
