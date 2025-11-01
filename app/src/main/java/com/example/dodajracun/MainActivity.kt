@@ -215,8 +215,9 @@ fun ScanReceiptScreen(
             fileUri?.let { uri ->
                 resolver.openOutputStream(uri, "wa")?.bufferedWriter(Charsets.UTF_8).use { writer ->
                     val dateTime = SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale("sl", "SI")).format(Date())
-                    val amountFormatted = amount.replace(',', '.')
-                    writer?.write("$amountFormatted,$dateTime\n")
+                    // Ohranimo decimalno vejico in spremenimo separator na podpičje
+                    val amountFormatted = amount // ohranimo originalno obliko z vejico
+                    writer?.write("$amountFormatted;$dateTime\n")
 
                     writer?.flush()
                 }
